@@ -10,6 +10,19 @@ export interface UsageEvent {
   value: string;
 }
 
+export interface TimeSeriesPoint {
+  date: string;
+  count: number;
+  value?: string;
+}
+
+export interface CompanyAnalytics {
+  company_id: string;
+  event_count: number;
+  last_activity: string;
+  event_types: Record<string, number>;
+}
+
 export interface DashboardSummary {
   total_events: number;
   unique_companies: number;
@@ -19,6 +32,9 @@ export interface DashboardSummary {
     start: string;
     end: string;
   };
+  time_series_data: TimeSeriesPoint[];
+  top_companies: CompanyAnalytics[];
+  daily_trends: Record<string, TimeSeriesPoint[]>;
 }
 
 export interface ApiResponse<T> {
