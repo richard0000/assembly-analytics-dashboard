@@ -16,6 +16,27 @@ type UsageEvent struct {
 	Value             string    `json:"value"`
 }
 
+type FilterParams struct {
+	StartDate  *time.Time `json:"start_date,omitempty"`
+	EndDate    *time.Time `json:"end_date,omitempty"`
+	CompanyIDs []string   `json:"company_ids,omitempty"`
+	EventTypes []string   `json:"event_types,omitempty"`
+	SearchText string     `json:"search_text,omitempty"`
+	Limit      int        `json:"limit,omitempty"`
+	Offset     int        `json:"offset,omitempty"`
+}
+
+type FilteredResults struct {
+	Events        []UsageEvent `json:"events"`
+	TotalCount    int          `json:"total_count"`
+	FilteredCount int          `json:"filtered_count"`
+}
+
+type ExportRequest struct {
+	Format  string       `json:"format"` // "csv" or "json"
+	Filters FilterParams `json:"filters"`
+}
+
 type TimeSeriesPoint struct {
 	Date  string `json:"date"`
 	Count int    `json:"count"`
@@ -30,14 +51,24 @@ type CompanyAnalytics struct {
 }
 
 type DashboardSummary struct {
-	TotalEvents     int                          `json:"total_events"`
-	UniqueCompanies int                          `json:"unique_companies"`
-	EventTypes      map[string]int               `json:"event_types"`
-	RecentEvents    []UsageEvent                 `json:"recent_events"`
-	TimeRange       map[string]interface{}       `json:"time_range"`
-	TimeSeriesData  []TimeSeriesPoint            `json:"time_series_data"`
-	TopCompanies    []CompanyAnalytics           `json:"top_companies"`
-	DailyTrends     map[string][]TimeSeriesPoint `json:"daily_trends"`
+	TotalEvents      int                          `json:"total_events"`
+	UniqueCompanies  int                          `json:"unique_companies"`
+	EventTypes       map[string]int               `json:"event_types"`
+	RecentEvents     []UsageEvent                 `json:"recent_events"`
+	TimeRange        map[string]interface{}       `json:"time_range"`
+	TimeSeriesData   []TimeSeriesPoint            `json:"time_series_data"`
+	TopCompanies     []CompanyAnalytics           `json:"top_companies"`
+	DailyTrends      map[string][]TimeSeriesPoint `json:"daily_trends"`
+	AvailableFilters AvailableFilters             `json:"available_filters"`
+}
+
+type AvailableFilters struct {
+	Companies  []string `json:"companies"`
+	EventTypes []string `json:"event_types"`
+	DateRange  struct {
+		Min string `json:"min"`
+		Max string `json:"max"`
+	} `json:"date_range"`
 }
 
 type CSVRecord struct {

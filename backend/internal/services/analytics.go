@@ -8,13 +8,19 @@ import (
 )
 
 type AnalyticsService struct {
-	csvParser *CSVParserService
-	events    []models.UsageEvent
-	lastLoad  time.Time
+	csvParser     *CSVParserService
+	filterService *FilterService
+	exportService *ExportService
+	events        []models.UsageEvent
+	lastLoad      time.Time
 }
 
 func NewAnalyticsService() *AnalyticsService {
-	return &AnalyticsService{}
+	filterService := NewFilterService()
+	return &AnalyticsService{
+		filterService: filterService,
+		exportService: NewExportService(filterService),
+	}
 }
 
 func (s *AnalyticsService) Initialize(dataPath string) error {
@@ -36,23 +42,49 @@ func (s *AnalyticsService) loadData() error {
 }
 
 func (s *AnalyticsService) GetDashboardSummary() *models.DashboardSummary {
-	// If no data is loaded, return mock data
 	if len(s.events) == 0 {
 		return s.getMockSummary()
 	}
 
 	summary := &models.DashboardSummary{
-		TotalEvents:     len(s.events),
-		UniqueCompanies: s.getUniqueCompanyCount(),
-		EventTypes:      s.getEventTypeBreakdown(),
-		RecentEvents:    s.getRecentEvents(10),
-		TimeRange:       s.getTimeRange(),
-		TimeSeriesData:  s.getTimeSeriesData(),
-		TopCompanies:    s.getTopCompanies(5),
-		DailyTrends:     s.getDailyTrends(),
+		TotalEvents:      len(s.events),
+		UniqueCompanies:  s.getUniqueCompanyCount(),
+		EventTypes:       s.getEventTypeBreakdown(),
+		RecentEvents:     s.getRecentEvents(10),
+		TimeRange:        s.getTimeRange(),
+		TimeSeriesData:   s.getTimeSeriesData(),
+		TopCompanies:     s.getTopCompanies(5),
+		DailyTrends:      s.getDailyTrends(),
+		AvailableFilters: s.filterService.GetAvailableFilters(s.events),
 	}
 
 	return summary
+}
+
+func (s *AnalyticsService) SearchEvents(filters models.FilterParams) models.FilteredResults {
+	if len(s.events) == 0 {
+		return models.FilteredResults{
+			Events:        []models.UsageEvent{},
+			TotalCount:    0,
+			FilteredCount: 0,
+		}
+	}
+
+	return s.filterService.ApplyFilters(s.events, filters)
+}
+
+func (s *AnalyticsService) ExportData(request models.ExportRequest) ([]byte, string, string, error) {
+	if len(s.events) == 0 {
+		return nil, "", "", fmt.Errorf("no data available for export")
+	}
+
+	data, contentType, err := s.exportService.ExportData(s.events, request)
+	if err != nil {
+		return nil, "", "", err
+	}
+
+	filename := s.exportService.GetFilename(request.Format, request.Filters)
+	return data, contentType, filename, nil
 }
 
 func (s *AnalyticsService) getUniqueCompanyCount() int {
@@ -80,7 +112,6 @@ func (s *AnalyticsService) getRecentEvents(limit int) []models.UsageEvent {
 		return []models.UsageEvent{}
 	}
 
-	// Sort events by created_at descending
 	sortedEvents := make([]models.UsageEvent, len(s.events))
 	copy(sortedEvents, s.events)
 
@@ -126,7 +157,6 @@ func (s *AnalyticsService) getTimeSeriesData() []models.TimeSeriesPoint {
 		return []models.TimeSeriesPoint{}
 	}
 
-	// Group events by date
 	dailyCounts := make(map[string]int)
 
 	for _, event := range s.events {
@@ -134,7 +164,6 @@ func (s *AnalyticsService) getTimeSeriesData() []models.TimeSeriesPoint {
 		dailyCounts[date]++
 	}
 
-	// Convert to time series points
 	var points []models.TimeSeriesPoint
 	for date, count := range dailyCounts {
 		points = append(points, models.TimeSeriesPoint{
@@ -143,7 +172,6 @@ func (s *AnalyticsService) getTimeSeriesData() []models.TimeSeriesPoint {
 		})
 	}
 
-	// Sort by date
 	sort.Slice(points, func(i, j int) bool {
 		return points[i].Date < points[j].Date
 	})
@@ -177,13 +205,11 @@ func (s *AnalyticsService) getTopCompanies(limit int) []models.CompanyAnalytics 
 			stats.EventTypes[event.Type]++
 		}
 
-		// Update last activity
 		if stats.LastActivity == "" || event.CreatedAt.Format(time.RFC3339) > stats.LastActivity {
 			stats.LastActivity = event.CreatedAt.Format(time.RFC3339)
 		}
 	}
 
-	// Convert to slice and sort by event count
 	var companies []models.CompanyAnalytics
 	for _, stats := range companyStats {
 		companies = append(companies, *stats)
@@ -206,7 +232,6 @@ func (s *AnalyticsService) getDailyTrends() map[string][]models.TimeSeriesPoint 
 		return trends
 	}
 
-	// Group by event type and date
 	typeDateCounts := make(map[string]map[string]int)
 
 	for _, event := range s.events {
@@ -224,7 +249,6 @@ func (s *AnalyticsService) getDailyTrends() map[string][]models.TimeSeriesPoint 
 		typeDateCounts[eventType][date]++
 	}
 
-	// Convert to time series format
 	for eventType, dateCounts := range typeDateCounts {
 		var points []models.TimeSeriesPoint
 
@@ -235,7 +259,6 @@ func (s *AnalyticsService) getDailyTrends() map[string][]models.TimeSeriesPoint 
 			})
 		}
 
-		// Sort by date
 		sort.Slice(points, func(i, j int) bool {
 			return points[i].Date < points[j].Date
 		})
@@ -247,7 +270,6 @@ func (s *AnalyticsService) getDailyTrends() map[string][]models.TimeSeriesPoint 
 }
 
 func (s *AnalyticsService) getMockSummary() *models.DashboardSummary {
-	// Fallback mock data if CSV loading fails
 	mockEvents := []models.UsageEvent{
 		{
 			ID:        "mock-1",
@@ -258,16 +280,6 @@ func (s *AnalyticsService) getMockSummary() *models.DashboardSummary {
 			Attribute: "UserLogin",
 			UpdatedAt: time.Now().Add(-2 * time.Hour),
 			Value:     "",
-		},
-		{
-			ID:        "mock-2",
-			CreatedAt: time.Now().Add(-1 * time.Hour),
-			CompanyID: "company-1",
-			Type:      "CumulativeMetric",
-			Content:   "Bank Balance Check",
-			Attribute: "BankBalance",
-			UpdatedAt: time.Now().Add(-1 * time.Hour),
-			Value:     "$50,000.00",
 		},
 	}
 
@@ -287,21 +299,27 @@ func (s *AnalyticsService) getMockSummary() *models.DashboardSummary {
 		TimeSeriesData: []models.TimeSeriesPoint{
 			{Date: "2025-05-20", Count: 23},
 			{Date: "2025-05-21", Count: 31},
-			{Date: "2025-05-22", Count: 28},
 		},
 		TopCompanies: []models.CompanyAnalytics{
 			{
 				CompanyID:    "company-1",
 				EventCount:   45,
 				LastActivity: time.Now().Format(time.RFC3339),
-				EventTypes:   map[string]int{"Action": 25, "Metric": 20},
+				EventTypes:   map[string]int{"Action": 25},
 			},
 		},
 		DailyTrends: map[string][]models.TimeSeriesPoint{
-			"Action": {
-				{Date: "2025-05-20", Count: 15},
-				{Date: "2025-05-21", Count: 18},
-				{Date: "2025-05-22", Count: 12},
+			"Action": {{Date: "2025-05-20", Count: 15}},
+		},
+		AvailableFilters: models.AvailableFilters{
+			Companies:  []string{"company-1", "company-2"},
+			EventTypes: []string{"Action", "Metric"},
+			DateRange: struct {
+				Min string `json:"min"`
+				Max string `json:"max"`
+			}{
+				Min: "2025-05-01",
+				Max: "2025-05-31",
 			},
 		},
 	}

@@ -33,7 +33,8 @@ func main() {
 	router.Use(cors.New(cors.Config{
 		AllowOrigins:     []string{"http://localhost:3000"},
 		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
-		ExposeHeaders:    []string{"Content-Length"},
+		AllowHeaders:     []string{"Origin", "Content-Type", "Accept", "Authorization"},
+		ExposeHeaders:    []string{"Content-Length", "Content-Disposition"},
 		AllowCredentials: true,
 	}))
 
@@ -42,9 +43,16 @@ func main() {
 	{
 		api.GET("/health", analyticsHandler.HealthCheck)
 		api.GET("/dashboard/summary", analyticsHandler.GetDashboardSummary)
+		api.GET("/events/search", analyticsHandler.SearchEvents)
+		api.POST("/export", analyticsHandler.ExportData)
 	}
 
 	// Start server
 	log.Printf("Server starting on port %s", cfg.Port)
+	log.Printf("Available endpoints:")
+	log.Printf("  GET  /api/v1/health")
+	log.Printf("  GET  /api/v1/dashboard/summary")
+	log.Printf("  GET  /api/v1/events/search")
+	log.Printf("  POST /api/v1/export")
 	log.Fatal(router.Run(":" + cfg.Port))
 }
