@@ -52,3 +52,9 @@ The dashboard currently processes two types of usage data:
    ```bash
    git clone <repository-url>
    cd assembly-dashboard
+   cd backend/
+   go mod tidy
+   cd ../frontend
+   npm install
+   cd ..
+   docker compose up --build
