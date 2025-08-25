@@ -1,11 +1,21 @@
 import React, { useState, useEffect } from "react";
 import styled from "styled-components";
-import { DashboardSummary } from "../../types/usage";
+import {
+  DashboardSummary,
+  FilterParams,
+  FilteredResults,
+  AvailableFilters,
+  ExportRequest,
+} from "../../types/usage";
 import { apiService } from "../../services/api";
 import { LoadingSpinner } from "../common/LoadingSpinner";
 import { TimeSeriesChart } from "../charts/TimeSeriesChart";
 import { EventTypeChart } from "../analytics/EventTypeChart";
 import { CompanyList } from "../analytics/CompanyList";
+import { FilterPanel } from "../filters/FilterPanel";
+import { useDebounce } from "../../hooks/useDebounce";
+import { downloadBlob } from "../../utils/downloadUtils";
+import { SearchResults } from "../search/SearchResult";
 
 const DashboardContainer = styled.div`
   max-width: 1400px;
@@ -37,6 +47,67 @@ const Header = styled.header`
     margin-top: 15px;
     color: #27ae60;
     font-size: 0.9rem;
+  }
+`;
+
+const ControlsSection = styled.div`
+  background: white;
+  padding: 20px;
+  border-radius: 8px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+  border: 1px solid #e1e8ed;
+  margin-bottom: 30px;
+`;
+
+const TabContainer = styled.div`
+  display: flex;
+  border-bottom: 1px solid #e1e8ed;
+  margin-bottom: 20px;
+`;
+
+const Tab = styled.button<{ active: boolean }>`
+  background: none;
+  border: none;
+  padding: 12px 24px;
+  cursor: pointer;
+  font-size: 1rem;
+  color: ${(props) => (props.active ? "#2980b9" : "#7f8c8d")};
+  border-bottom: 2px solid
+    ${(props) => (props.active ? "#2980b9" : "transparent")};
+  transition: all 0.2s ease;
+
+  &:hover {
+    color: #2980b9;
+  }
+`;
+
+const ExportSection = styled.div`
+  display: flex;
+  gap: 15px;
+  align-items: center;
+  padding: 15px;
+  background: #f8f9fa;
+  border-radius: 6px;
+  margin-top: 20px;
+`;
+
+const ExportButton = styled.button<{ format: "csv" | "json" }>`
+  background: ${(props) => (props.format === "csv" ? "#27ae60" : "#3498db")};
+  color: white;
+  border: none;
+  padding: 8px 16px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.9rem;
+  transition: opacity 0.2s ease;
+
+  &:hover {
+    opacity: 0.8;
+  }
+
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
   }
 `;
 
@@ -160,6 +231,14 @@ const RecentEventsList = styled.div`
   }
 `;
 
+const SearchResultsContainer = styled.div`
+  background: white;
+  border-radius: 8px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+  border: 1px solid #e1e8ed;
+  margin-bottom: 30px;
+`;
+
 const ErrorMessage = styled.div`
   background: #fee;
   color: #c53030;
@@ -170,11 +249,43 @@ const ErrorMessage = styled.div`
   text-align: center;
 `;
 
+interface DashboardTab {
+  id: "overview" | "search";
+  label: string;
+}
+
+const DASHBOARD_TABS: DashboardTab[] = [
+  { id: "overview", label: "Overview" },
+  { id: "search", label: "Search & Filter" },
+];
+
 export const Dashboard: React.FC = () => {
+  // Core dashboard state
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  // Tab and filter state
+  const [activeTab, setActiveTab] = useState<"overview" | "search">("overview");
+  const [filters, setFilters] = useState<FilterParams>({
+    limit: 50,
+    offset: 0,
+  });
+  const [availableFilters, setAvailableFilters] =
+    useState<AvailableFilters | null>(null);
+
+  // Search and results state
+  const [searchResults, setSearchResults] = useState<FilteredResults | null>(
+    null
+  );
+  const [searchLoading, setSearchLoading] = useState(false);
+  const [searchError, setSearchError] = useState<string | undefined>(undefined);
+  const [exportLoading, setExportLoading] = useState(false);
+
+  // Debounce search text input
+  const debouncedSearchText = useDebounce(filters.search_text, 300);
+
+  // Load initial dashboard data
   useEffect(() => {
     const loadDashboardData = async () => {
       try {
@@ -182,6 +293,32 @@ export const Dashboard: React.FC = () => {
         setError(null);
         const data = await apiService.getDashboardSummary();
         setSummary(data);
+
+        // Extract available filters from summary data
+        const availableCompanies = data.top_companies.map((c) => c.company_id);
+        const availableEventTypes = Object.keys(data.event_types);
+        const dates = data.recent_events
+          .map((e) => e.created_at)
+          .filter(Boolean);
+
+        setAvailableFilters({
+          companies: availableCompanies,
+          event_types: availableEventTypes,
+          date_range: {
+            min:
+              dates.length > 0
+                ? Math.min(
+                    ...dates.map((d) => new Date(d).getTime())
+                  ).toString()
+                : "",
+            max:
+              dates.length > 0
+                ? Math.max(
+                    ...dates.map((d) => new Date(d).getTime())
+                  ).toString()
+                : "",
+          },
+        });
       } catch (err) {
         setError(
           err instanceof Error ? err.message : "Failed to load dashboard data"
@@ -193,6 +330,83 @@ export const Dashboard: React.FC = () => {
 
     loadDashboardData();
   }, []);
+
+  // Perform search when filters change or search text is debounced
+  useEffect(() => {
+    if (activeTab === "search") {
+      performSearch();
+    }
+  }, [
+    activeTab,
+    debouncedSearchText,
+    filters.start_date,
+    filters.end_date,
+    filters.company_ids,
+    filters.event_types,
+    filters.limit,
+    filters.offset,
+  ]);
+
+  const performSearch = async () => {
+    try {
+      setSearchLoading(true);
+      setSearchError(undefined);
+
+      const searchFilters = {
+        ...filters,
+        search_text: debouncedSearchText,
+      };
+
+      const results = await apiService.searchEvents(searchFilters);
+      setSearchResults(results);
+    } catch (err) {
+      setSearchError(
+        err instanceof Error ? err.message : "Failed to search events"
+      );
+    } finally {
+      setSearchLoading(false);
+    }
+  };
+
+  const handleFiltersChange = (newFilters: FilterParams) => {
+    setFilters((prevFilters) => ({
+      ...prevFilters,
+      ...newFilters,
+      offset: 0, // Reset pagination when filters change
+    }));
+  };
+
+  const handleLoadMore = () => {
+    if (searchResults) {
+      setFilters((prevFilters) => ({
+        ...prevFilters,
+        offset: (prevFilters.offset || 0) + (prevFilters.limit || 50),
+      }));
+    }
+  };
+
+  const handleExport = async (format: "csv" | "json") => {
+    try {
+      setExportLoading(true);
+
+      const exportRequest: ExportRequest = {
+        format,
+        filters: {
+          ...filters,
+          search_text: debouncedSearchText,
+        },
+      };
+
+      const { blob, filename } = await apiService.exportData(exportRequest);
+      downloadBlob(blob, filename);
+    } catch (err) {
+      setSearchError(
+        err instanceof Error ? err.message : "Failed to export data"
+      );
+    } finally {
+      setExportLoading(false);
+    }
+  };
 
   const formatDate = (dateString: string): string => {
     try {
@@ -241,88 +455,133 @@ export const Dashboard: React.FC = () => {
         </div>
       </Header>
 
-      <StatsGrid>
-        <StatCard>
-          <h3>Total Events</h3>
-          <div className="value">{summary.total_events.toLocaleString()}</div>
-          <div className="subtitle">Across all companies</div>
-        </StatCard>
-
-        <StatCard>
-          <h3>Active Companies</h3>
-          <div className="value">{summary.unique_companies}</div>
-          <div className="subtitle">With recorded activity</div>
-        </StatCard>
-
-        <StatCard>
-          <h3>Event Types</h3>
-          <div className="value">{Object.keys(summary.event_types).length}</div>
-          <div className="subtitle">Different activity categories</div>
-        </StatCard>
-
-        <StatCard>
-          <h3>Top Event Type</h3>
-          <div className="value">
-            {Object.entries(summary.event_types).sort(
-              ([, a], [, b]) => b - a
-            )[0]?.[1] || 0}
-          </div>
-          <div className="subtitle">
-            {Object.entries(summary.event_types).sort(
-              ([, a], [, b]) => b - a
-            )[0]?.[0] || "N/A"}
-          </div>
-        </StatCard>
-      </StatsGrid>
-
-      <ChartsGrid>
-        <TimeSeriesChart
-          data={summary.time_series_data}
-          title="Daily Usage Trends"
-        />
-        <EventTypeChart
-          eventTypes={summary.event_types}
-          title="Event Distribution"
-        />
-      </ChartsGrid>
-
-      <AnalyticsGrid>
-        <CompanyList
-          companies={summary.top_companies}
-          title="Most Active Companies"
-        />
-
-        <RecentEventsList>
-          <h3>Recent Activity</h3>
-          {summary.recent_events.length === 0 ? (
-            <p
-              style={{
-                color: "#7f8c8d",
-                textAlign: "center",
-                padding: "40px 0",
-              }}
+      <ControlsSection>
+        <TabContainer>
+          {DASHBOARD_TABS.map((tab) => (
+            <Tab
+              key={tab.id}
+              active={activeTab === tab.id}
+              onClick={() => setActiveTab(tab.id)}
             >
-              No recent events available
-            </p>
-          ) : (
-            summary.recent_events.map((event) => (
-              <div key={event.id} className="event-item">
-                <div className="event-header">
-                  <span className="event-type">{event.type}</span>
-                  <span className="event-time">
-                    {formatDate(event.created_at)}
-                  </span>
-                </div>
-                <div className="event-content">{event.content}</div>
-                {event.value && (
-                  <div className="event-value">Value: {event.value}</div>
-                )}
-                <div className="event-company">Company: {event.company_id}</div>
+              {tab.label}
+            </Tab>
+          ))}
+        </TabContainer>
+
+        {activeTab === "search" && availableFilters && (
+          <FilterPanel
+            filters={filters}
+            availableFilters={availableFilters}
+            onFiltersChange={handleFiltersChange}
+            onExport={handleExport}
+            isLoading={exportLoading}
+          />
+        )}
+      </ControlsSection>
+
+      {activeTab === "overview" && (
+        <>
+          <StatsGrid>
+            <StatCard>
+              <h3>Total Events</h3>
+              <div className="value">
+                {summary.total_events.toLocaleString()}
               </div>
-            ))
-          )}
-        </RecentEventsList>
-      </AnalyticsGrid>
+              <div className="subtitle">Across all companies</div>
+            </StatCard>
+
+            <StatCard>
+              <h3>Active Companies</h3>
+              <div className="value">{summary.unique_companies}</div>
+              <div className="subtitle">With recorded activity</div>
+            </StatCard>
+
+            <StatCard>
+              <h3>Event Types</h3>
+              <div className="value">
+                {Object.keys(summary.event_types).length}
+              </div>
+              <div className="subtitle">Different activity categories</div>
+            </StatCard>
+
+            <StatCard>
+              <h3>Top Event Type</h3>
+              <div className="value">
+                {Object.entries(summary.event_types).sort(
+                  ([, a], [, b]) => b - a
+                )[0]?.[1] || 0}
+              </div>
+              <div className="subtitle">
+                {Object.entries(summary.event_types).sort(
+                  ([, a], [, b]) => b - a
+                )[0]?.[0] || "N/A"}
+              </div>
+            </StatCard>
+          </StatsGrid>
+
+          <ChartsGrid>
+            <TimeSeriesChart
+              data={summary.time_series_data}
+              title="Daily Usage Trends"
+            />
+            <EventTypeChart
+              eventTypes={summary.event_types}
+              title="Event Distribution"
+            />
+          </ChartsGrid>
+
+          <AnalyticsGrid>
+            <CompanyList
+              companies={summary.top_companies}
+              title="Most Active Companies"
+            />
+
+            <RecentEventsList>
+              <h3>Recent Activity</h3>
+              {summary.recent_events.length === 0 ? (
+                <p
+                  style={{
+                    color: "#7f8c8d",
+                    textAlign: "center",
+                    padding: "40px 0",
+                  }}
+                >
+                  No recent events available
+                </p>
+              ) : (
+                summary.recent_events.map((event) => (
+                  <div key={event.id} className="event-item">
+                    <div className="event-header">
+                      <span className="event-type">{event.type}</span>
+                      <span className="event-time">
+                        {formatDate(event.created_at)}
+                      </span>
+                    </div>
+                    <div className="event-content">{event.content}</div>
+                    {event.value && (
+                      <div className="event-value">Value: {event.value}</div>
+                    )}
+                    <div className="event-company">
+                      Company: {event.company_id}
+                    </div>
+                  </div>
+                ))
+              )}
+            </RecentEventsList>
+          </AnalyticsGrid>
+        </>
+      )}
+
+      {activeTab === "search" && (
+        <SearchResultsContainer>
+          <SearchResults
+            results={searchResults}
+            filters={filters}
+            isLoading={searchLoading}
+            error={searchError}
+          />
+        </SearchResultsContainer>
+      )}
     </DashboardContainer>
   );
 };
