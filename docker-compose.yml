@@ -10,6 +10,7 @@ services:
     environment:
       - PORT=8080
       - GIN_MODE=release
+      - DATA_PATH=/app/data
     volumes:
       - ./data:/app/data:ro
     networks:
