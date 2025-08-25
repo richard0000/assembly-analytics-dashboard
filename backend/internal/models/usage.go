@@ -1,6 +1,8 @@
 package models
 
-import "time"
+import (
+	"time"
+)
 
 type UsageEvent struct {
 	ID                string    `json:"id"`
@@ -14,10 +16,38 @@ type UsageEvent struct {
 	Value             string    `json:"value"`
 }
 
+type TimeSeriesPoint struct {
+	Date  string `json:"date"`
+	Count int    `json:"count"`
+	Value string `json:"value,omitempty"`
+}
+
+type CompanyAnalytics struct {
+	CompanyID    string         `json:"company_id"`
+	EventCount   int            `json:"event_count"`
+	LastActivity string         `json:"last_activity"`
+	EventTypes   map[string]int `json:"event_types"`
+}
+
 type DashboardSummary struct {
-	TotalEvents     int                    `json:"total_events"`
-	UniqueCompanies int                    `json:"unique_companies"`
-	EventTypes      map[string]int         `json:"event_types"`
-	RecentEvents    []UsageEvent           `json:"recent_events"`
-	TimeRange       map[string]interface{} `json:"time_range"`
+	TotalEvents     int                          `json:"total_events"`
+	UniqueCompanies int                          `json:"unique_companies"`
+	EventTypes      map[string]int               `json:"event_types"`
+	RecentEvents    []UsageEvent                 `json:"recent_events"`
+	TimeRange       map[string]interface{}       `json:"time_range"`
+	TimeSeriesData  []TimeSeriesPoint            `json:"time_series_data"`
+	TopCompanies    []CompanyAnalytics           `json:"top_companies"`
+	DailyTrends     map[string][]TimeSeriesPoint `json:"daily_trends"`
+}
+
+type CSVRecord struct {
+	ID                string
+	CreatedAt         string
+	CompanyID         string
+	Type              string
+	Content           string
+	Attribute         string
+	UpdatedAt         string
+	OriginalTimestamp string
+	Value             string
 }
