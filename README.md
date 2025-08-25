@@ -58,3 +58,11 @@ The dashboard currently processes two types of usage data:
    npm install
    cd ..
    docker compose up --build
+
+### Screenshots
+#### Overview Tab
+<img width="1611" height="1029" alt="image" src="https://github.com/user-attachments/assets/eac8ba81-7518-42ef-b3fb-d4fcc8fe3f76" />
+
+### Search Tab
+<img width="1611" height="1029" alt="image" src="https://github.com/user-attachments/assets/f433ee78-b8e2-4c9b-8629-7d2f960dd984" />
+
